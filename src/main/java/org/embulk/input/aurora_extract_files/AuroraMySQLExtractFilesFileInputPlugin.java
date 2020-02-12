@@ -116,7 +116,7 @@ public class AuroraMySQLExtractFilesFileInputPlugin implements FileInputPlugin {
 
     public String selectIntoQuery(String query, String s3Bucket, String s3PathPrefix) {
         String s3Path = String.format("s3://%s/%s", s3Bucket, s3PathPrefix);
-        return String.format("%s INTO OUTFILE S3 '%s' FIELDS TERMINATED BY ',' ENCLOSED BY '\"' LINES TERMINATED BY '\n' MANIFEST OFF OVERWRITE ON;", query, s3Path);
+        return String.format("%s INTO OUTFILE S3 '%s' CHARACTER SET UTF8 FIELDS TERMINATED BY '\\t' ENCLOSED BY '\"' MANIFEST OFF OVERWRITE ON;", query, s3Path);
     }
 
     public void executeAuroraQuery(PluginTask task) {
