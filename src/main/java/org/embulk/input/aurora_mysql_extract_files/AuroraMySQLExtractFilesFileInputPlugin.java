@@ -92,10 +92,9 @@ public class AuroraMySQLExtractFilesFileInputPlugin implements FileInputPlugin {
     public ConfigDiff transaction(ConfigSource config, FileInputPlugin.Control control) {
         PluginTask task = config.loadConfig(PluginTask.class);
 
-        client = newS3Client(task);
-
         // delete s3
         try {
+            client = newS3Client(task);
             log.info("deleting objects");
             List<String> s3Keys = getS3Keys(task);
             if (s3Keys.isEmpty()){
