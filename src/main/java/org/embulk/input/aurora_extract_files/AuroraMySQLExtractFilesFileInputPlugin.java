@@ -1,8 +1,6 @@
 package org.embulk.input.aurora_mysql_extract_files;
 
-import java.io.FileInputStream;
 import java.io.InputStream;
-import java.util.ArrayList;
 import java.util.List;
 
 import java.sql.Connection;
@@ -10,13 +8,9 @@ import java.sql.DriverManager;
 import java.sql.Statement;
 import java.util.stream.Collectors;
 
-import com.amazonaws.ClientConfiguration;
-import com.amazonaws.retry.PredefinedRetryPolicies;
 import com.amazonaws.services.s3.model.DeleteObjectsRequest;
 import com.google.common.base.Optional;
-import com.google.common.collect.ImmutableList;
 
-import org.apache.http.client.entity.InputStreamFactory;
 import org.embulk.config.Config;
 import org.embulk.config.ConfigDefault;
 import org.embulk.config.ConfigDiff;
@@ -31,18 +25,15 @@ import org.embulk.spi.FileInputPlugin;
 import org.embulk.spi.TransactionalFileInput;
 import org.embulk.spi.util.InputStreamTransactionalFileInput;
 
-import com.amazonaws.auth.AWSCredentials;
 import com.amazonaws.auth.AWSStaticCredentialsProvider;
 import com.amazonaws.auth.BasicAWSCredentials;
 import com.amazonaws.regions.Regions;
 import com.amazonaws.services.s3.AmazonS3;
-import com.amazonaws.services.s3.AmazonS3Client;
 import com.amazonaws.services.s3.AmazonS3ClientBuilder;
 import com.amazonaws.services.s3.model.DeleteObjectRequest;
 import com.amazonaws.services.s3.model.GetObjectRequest;
 import com.amazonaws.services.s3.model.ListObjectsRequest;
 import com.amazonaws.services.s3.model.ObjectListing;
-import com.amazonaws.services.s3.model.Region;
 import com.amazonaws.services.s3.model.S3Object;
 import com.amazonaws.services.s3.model.S3ObjectSummary;
 
