@@ -8,7 +8,11 @@ import java.util.List;
 import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.Statement;
+import java.util.stream.Collectors;
 
+import com.amazonaws.ClientConfiguration;
+import com.amazonaws.retry.PredefinedRetryPolicies;
+import com.amazonaws.services.s3.model.DeleteObjectsRequest;
 import com.google.common.base.Optional;
 import com.google.common.collect.ImmutableList;
 
@@ -47,6 +51,7 @@ import org.slf4j.Logger;
 public class AuroraMySQLExtractFilesFileInputPlugin implements FileInputPlugin {
 
     private static final Logger log = Exec.getLogger(AuroraMySQLExtractFilesFileInputPlugin.class);
+    private AmazonS3 client;
 
     public interface PluginTask extends Task {
         @Config("aws_access_key_id")
@@ -97,11 +102,25 @@ public class AuroraMySQLExtractFilesFileInputPlugin implements FileInputPlugin {
     public ConfigDiff transaction(ConfigSource config, FileInputPlugin.Control control) {
         PluginTask task = config.loadConfig(PluginTask.class);
 
+        client = newS3Client(task);
+
         // delete s3
         try {
             log.info("deleting objects");
-            AmazonS3 client = newS3Client(task);
-            client.deleteObject(new DeleteObjectRequest(task.getS3Bucket(), task.getS3PathPrefix()));
+            List<String> s3Keys = getS3Keys(task);
+            if (s3Keys.isEmpty()){
+                log.info("no objects are detected for delete");
+            }else{
+                log.info("following files will be deleted \n {}", String.join("\n",s3Keys));
+                client.deleteObject(new DeleteObjectRequest(task.getS3Bucket(), task.getS3PathPrefix()));
+                DeleteObjectsRequest multiObjectDeleteRequest = new DeleteObjectsRequest(task.getS3Bucket());
+                List<DeleteObjectsRequest.KeyVersion> keys = s3Keys.stream()
+                        .map(DeleteObjectsRequest.KeyVersion::new)
+                        .collect(Collectors.toList());
+                multiObjectDeleteRequest.setKeys(keys);
+                client.deleteObjects(multiObjectDeleteRequest);
+            }
+
         } catch(Exception e){
             log.error("delete error: ", e);
             return null;
@@ -146,18 +165,11 @@ public class AuroraMySQLExtractFilesFileInputPlugin implements FileInputPlugin {
             return;
         }
 
-        AmazonS3 client = newS3Client(task);
 
         // TODO: read manifest
-        ImmutableList.Builder<String> builder = ImmutableList.builder();
-        ListObjectsRequest request = new ListObjectsRequest().withBucketName(task.getS3Bucket())
-                .withPrefix(String.format("%s.part",task.getS3PathPrefix()));
-        ObjectListing list = client.listObjects(request);
-        List<S3ObjectSummary> objects = list.getObjectSummaries();
-        log.info(String.format("%d files", objects.size()));
-        objects.forEach(object -> builder.add(object.getKey()));
-        List<String> files = builder.build().asList();
-        task.setFiles(files);
+        List<String> s3Keys = getS3Keys(task);
+        log.info(String.format("%d files", s3Keys.size()));
+        task.setFiles(s3Keys);
     }
 
     @Override
@@ -214,5 +226,13 @@ public class AuroraMySQLExtractFilesFileInputPlugin implements FileInputPlugin {
             .standard()
             .withCredentials(new AWSStaticCredentialsProvider(awsCreds))
             .withRegion(Regions.AP_NORTHEAST_1).build();
+    }
+
+    private List<String> getS3Keys(PluginTask task){
+        ListObjectsRequest request = new ListObjectsRequest().withBucketName(task.getS3Bucket())
+                .withPrefix(String.format("%s.part",task.getS3PathPrefix()));
+        ObjectListing list = client.listObjects(request);
+        List<S3ObjectSummary> objects = list.getObjectSummaries();
+        return objects.stream().map(S3ObjectSummary::getKey).collect(Collectors.toList());
     }
 }
