@@ -101,7 +101,8 @@ public class AuroraMySQLExtractFilesFileInputPlugin implements FileInputPlugin {
             if (s3Keys.isEmpty()){
                 log.info("no objects are detected for delete");
             }else{
-                log.info("following files will be deleted \n {}", String.join("\n",s3Keys));
+                List<String> s3Paths = s3Keys.stream().map(k -> String.format("s3://%s/%s", task.getS3Bucket(),k)).collect(Collectors.toList());
+                log.info("following files will be deleted\n{}", String.join("\n",s3Paths));
                 client.deleteObject(new DeleteObjectRequest(task.getS3Bucket(), task.getS3PathPrefix()));
                 DeleteObjectsRequest multiObjectDeleteRequest = new DeleteObjectsRequest(task.getS3Bucket());
                 List<DeleteObjectsRequest.KeyVersion> keys = s3Keys.stream()
