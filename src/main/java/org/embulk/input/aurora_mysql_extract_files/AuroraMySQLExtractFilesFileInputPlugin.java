@@ -1,11 +1,10 @@
 package org.embulk.input.aurora_mysql_extract_files;
 
 import java.io.InputStream;
-import java.util.List;
-
 import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.Statement;
+import java.util.List;
 import java.util.stream.Collectors;
 
 import com.amazonaws.services.s3.model.DeleteObjectsRequest;
