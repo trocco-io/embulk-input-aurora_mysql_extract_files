@@ -94,29 +94,18 @@ public class AuroraMySQLExtractFilesFileInputPlugin implements FileInputPlugin {
 
         // delete s3
         try {
-            client = newS3Client(task);
-            log.info("deleting objects");
-            List<String> s3Keys = getS3Keys(task);
-            if (s3Keys.isEmpty()){
-                log.info("no objects are detected for delete");
-            }else{
-                List<String> s3Paths = s3Keys.stream().map(k -> String.format("s3://%s/%s", task.getS3Bucket(),k)).collect(Collectors.toList());
-                log.info("following files will be deleted\n{}", String.join("\n",s3Paths));
-                client.deleteObject(new DeleteObjectRequest(task.getS3Bucket(), task.getS3PathPrefix()));
-                DeleteObjectsRequest multiObjectDeleteRequest = new DeleteObjectsRequest(task.getS3Bucket());
-                List<DeleteObjectsRequest.KeyVersion> keys = s3Keys.stream()
-                        .map(DeleteObjectsRequest.KeyVersion::new)
-                        .collect(Collectors.toList());
-                multiObjectDeleteRequest.setKeys(keys);
-                client.deleteObjects(multiObjectDeleteRequest);
+            if (task.getAllowBeforeCleanUp()){
+                deleteS3Dump(task);
             }
-
         } catch(Exception e){
             log.error("delete error: ", e);
             return null;
         }
 
-        executeAuroraQuery(task);
+        if (!task.getSkipQuery()){
+            executeAuroraQuery(task);
+        }
+        setFiles(task);
         // run() method is called for this number of times in parallel.
         int taskCount = task.getFiles().size();
 
@@ -152,14 +141,7 @@ public class AuroraMySQLExtractFilesFileInputPlugin implements FileInputPlugin {
         } catch (Exception e) {
             // TODO: handle exception
             log.error("connection error", e);
-            return;
         }
-
-
-        // TODO: read manifest
-        List<String> s3Keys = getS3Keys(task);
-        log.info(String.format("%d files", s3Keys.size()));
-        task.setFiles(s3Keys);
     }
 
     @Override
@@ -224,5 +206,32 @@ public class AuroraMySQLExtractFilesFileInputPlugin implements FileInputPlugin {
         ObjectListing list = client.listObjects(request);
         List<S3ObjectSummary> objects = list.getObjectSummaries();
         return objects.stream().map(S3ObjectSummary::getKey).collect(Collectors.toList());
+    }
+
+    private void deleteS3Dump(PluginTask task){
+        client = newS3Client(task);
+        List<String> s3Keys = getS3Keys(task);
+
+        if (s3Keys.isEmpty()){
+            log.info("no objects are detected for delete");
+        }else{
+            log.info("deleting objects");
+            List<String> s3Paths = s3Keys.stream().map(k -> String.format("s3://%s/%s", task.getS3Bucket(),k)).collect(Collectors.toList());
+            log.info("following files will be deleted\n{}", String.join("\n",s3Paths));
+            client.deleteObject(new DeleteObjectRequest(task.getS3Bucket(), task.getS3PathPrefix()));
+            DeleteObjectsRequest multiObjectDeleteRequest = new DeleteObjectsRequest(task.getS3Bucket());
+            List<DeleteObjectsRequest.KeyVersion> keys = s3Keys.stream()
+                    .map(DeleteObjectsRequest.KeyVersion::new)
+                    .collect(Collectors.toList());
+            multiObjectDeleteRequest.setKeys(keys);
+            client.deleteObjects(multiObjectDeleteRequest);
+        }
+    }
+
+    private void setFiles(PluginTask task){
+        // TODO: read manifest
+        List<String> s3Keys = getS3Keys(task);
+        log.info(String.format("%d files", s3Keys.size()));
+        task.setFiles(s3Keys);
     }
 }
