@@ -45,6 +45,8 @@ public class AuroraMySQLExtractFilesFileInputPlugin implements FileInputPlugin {
         try {
             if (task.getAllowBeforeCleanUp()){
                 deleteS3Dump(task);
+            }else{
+                log.info("Skip S3 Clean up");
             }
         } catch(Exception e){
             log.error("delete error: ", e);
@@ -53,6 +55,8 @@ public class AuroraMySQLExtractFilesFileInputPlugin implements FileInputPlugin {
 
         if (!task.getSkipQuery()){
             executeAuroraQuery(task);
+        }else{
+            log.info("Skip query execution");
         }
         setFiles(task);
         // run() method is called for this number of times in parallel.
