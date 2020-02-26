@@ -8,17 +8,11 @@ import java.util.List;
 import java.util.stream.Collectors;
 
 import com.amazonaws.services.s3.model.DeleteObjectsRequest;
-import com.google.common.base.Optional;
 
-import org.embulk.config.Config;
-import org.embulk.config.ConfigDefault;
 import org.embulk.config.ConfigDiff;
-import org.embulk.config.ConfigInject;
 import org.embulk.config.ConfigSource;
-import org.embulk.config.Task;
 import org.embulk.config.TaskReport;
 import org.embulk.config.TaskSource;
-import org.embulk.spi.BufferAllocator;
 import org.embulk.spi.Exec;
 import org.embulk.spi.FileInputPlugin;
 import org.embulk.spi.TransactionalFileInput;
@@ -42,51 +36,6 @@ public class AuroraMySQLExtractFilesFileInputPlugin implements FileInputPlugin {
 
     private static final Logger log = Exec.getLogger(AuroraMySQLExtractFilesFileInputPlugin.class);
     private AmazonS3 client;
-
-    public interface PluginTask extends Task {
-        @Config("aws_access_key_id")
-        public Optional<String> getAwsAccessKey();
-
-        @Config("aws_secret_access_key")
-        public Optional<String> getAwsSecretAccessKey();
-
-        @Config("host")
-        public String getHost();
-
-        @Config("port")
-        @ConfigDefault("3306")
-        public int getPort();
-
-        @Config("database")
-        public String getDatabase();
-
-        @Config("user")
-        public String getUser();
-
-        @Config("password")
-        @ConfigDefault("\"\"")
-        public String getPassword();
-
-        @Config("query")
-        public String getQuery();
-
-        @Config("s3_bucket")
-        public String getS3Bucket();
-
-        @Config("s3_path_prefix")
-        public String getS3PathPrefix();
-
-        @Config("ssl")
-        @ConfigDefault("true")
-        public boolean getIsSsl();
-
-        public List<String> getFiles();
-
-        public void setFiles(List<String> files);
-
-        @ConfigInject
-        public BufferAllocator getBufferAllocator();
-    }
 
     @Override
     public ConfigDiff transaction(ConfigSource config, FileInputPlugin.Control control) {
