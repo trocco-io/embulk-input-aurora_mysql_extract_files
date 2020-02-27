@@ -8,17 +8,11 @@ import java.util.List;
 import java.util.stream.Collectors;
 
 import com.amazonaws.services.s3.model.DeleteObjectsRequest;
-import com.google.common.base.Optional;
 
-import org.embulk.config.Config;
-import org.embulk.config.ConfigDefault;
 import org.embulk.config.ConfigDiff;
-import org.embulk.config.ConfigInject;
 import org.embulk.config.ConfigSource;
-import org.embulk.config.Task;
 import org.embulk.config.TaskReport;
 import org.embulk.config.TaskSource;
-import org.embulk.spi.BufferAllocator;
 import org.embulk.spi.Exec;
 import org.embulk.spi.FileInputPlugin;
 import org.embulk.spi.TransactionalFileInput;
@@ -41,52 +35,6 @@ import org.slf4j.Logger;
 public class AuroraMySQLExtractFilesFileInputPlugin implements FileInputPlugin {
 
     private static final Logger log = Exec.getLogger(AuroraMySQLExtractFilesFileInputPlugin.class);
-    private AmazonS3 client;
-
-    public interface PluginTask extends Task {
-        @Config("aws_access_key_id")
-        public Optional<String> getAwsAccessKey();
-
-        @Config("aws_secret_access_key")
-        public Optional<String> getAwsSecretAccessKey();
-
-        @Config("host")
-        public String getHost();
-
-        @Config("port")
-        @ConfigDefault("3306")
-        public int getPort();
-
-        @Config("database")
-        public String getDatabase();
-
-        @Config("user")
-        public String getUser();
-
-        @Config("password")
-        @ConfigDefault("\"\"")
-        public String getPassword();
-
-        @Config("query")
-        public String getQuery();
-
-        @Config("s3_bucket")
-        public String getS3Bucket();
-
-        @Config("s3_path_prefix")
-        public String getS3PathPrefix();
-
-        @Config("ssl")
-        @ConfigDefault("true")
-        public boolean getIsSsl();
-
-        public List<String> getFiles();
-
-        public void setFiles(List<String> files);
-
-        @ConfigInject
-        public BufferAllocator getBufferAllocator();
-    }
 
     @Override
     public ConfigDiff transaction(ConfigSource config, FileInputPlugin.Control control) {
@@ -94,29 +42,22 @@ public class AuroraMySQLExtractFilesFileInputPlugin implements FileInputPlugin {
 
         // delete s3
         try {
-            client = newS3Client(task);
-            log.info("deleting objects");
-            List<String> s3Keys = getS3Keys(task);
-            if (s3Keys.isEmpty()){
-                log.info("no objects are detected for delete");
+            if (task.getAllowBeforeCleanUp()){
+                deleteS3Dump(task);
             }else{
-                List<String> s3Paths = s3Keys.stream().map(k -> String.format("s3://%s/%s", task.getS3Bucket(),k)).collect(Collectors.toList());
-                log.info("following files will be deleted\n{}", String.join("\n",s3Paths));
-                client.deleteObject(new DeleteObjectRequest(task.getS3Bucket(), task.getS3PathPrefix()));
-                DeleteObjectsRequest multiObjectDeleteRequest = new DeleteObjectsRequest(task.getS3Bucket());
-                List<DeleteObjectsRequest.KeyVersion> keys = s3Keys.stream()
-                        .map(DeleteObjectsRequest.KeyVersion::new)
-                        .collect(Collectors.toList());
-                multiObjectDeleteRequest.setKeys(keys);
-                client.deleteObjects(multiObjectDeleteRequest);
+                log.info("Skip S3 Clean up");
             }
-
         } catch(Exception e){
             log.error("delete error: ", e);
             return null;
         }
 
-        executeAuroraQuery(task);
+        if (!task.getSkipQuery()){
+            executeAuroraQuery(task);
+        }else{
+            log.info("Skip query execution");
+        }
+        setFiles(task);
         // run() method is called for this number of times in parallel.
         int taskCount = task.getFiles().size();
 
@@ -152,14 +93,7 @@ public class AuroraMySQLExtractFilesFileInputPlugin implements FileInputPlugin {
         } catch (Exception e) {
             // TODO: handle exception
             log.error("connection error", e);
-            return;
         }
-
-
-        // TODO: read manifest
-        List<String> s3Keys = getS3Keys(task);
-        log.info(String.format("%d files", s3Keys.size()));
-        task.setFiles(s3Keys);
     }
 
     @Override
@@ -219,10 +153,38 @@ public class AuroraMySQLExtractFilesFileInputPlugin implements FileInputPlugin {
     }
 
     private List<String> getS3Keys(PluginTask task){
+        AmazonS3 client = newS3Client(task);
         ListObjectsRequest request = new ListObjectsRequest().withBucketName(task.getS3Bucket())
                 .withPrefix(String.format("%s.part",task.getS3PathPrefix()));
         ObjectListing list = client.listObjects(request);
         List<S3ObjectSummary> objects = list.getObjectSummaries();
         return objects.stream().map(S3ObjectSummary::getKey).collect(Collectors.toList());
+    }
+
+    private void deleteS3Dump(PluginTask task){
+        AmazonS3 client = newS3Client(task);
+        List<String> s3Keys = getS3Keys(task);
+
+        if (s3Keys.isEmpty()){
+            log.info("no objects are detected for delete");
+        }else{
+            log.info("deleting objects");
+            List<String> s3Paths = s3Keys.stream().map(k -> String.format("s3://%s/%s", task.getS3Bucket(),k)).collect(Collectors.toList());
+            log.info("following files will be deleted\n{}", String.join("\n",s3Paths));
+            client.deleteObject(new DeleteObjectRequest(task.getS3Bucket(), task.getS3PathPrefix()));
+            DeleteObjectsRequest multiObjectDeleteRequest = new DeleteObjectsRequest(task.getS3Bucket());
+            List<DeleteObjectsRequest.KeyVersion> keys = s3Keys.stream()
+                    .map(DeleteObjectsRequest.KeyVersion::new)
+                    .collect(Collectors.toList());
+            multiObjectDeleteRequest.setKeys(keys);
+            client.deleteObjects(multiObjectDeleteRequest);
+        }
+    }
+
+    private void setFiles(PluginTask task){
+        // TODO: read manifest
+        List<String> s3Keys = getS3Keys(task);
+        log.info(String.format("%d files", s3Keys.size()));
+        task.setFiles(s3Keys);
     }
 }
