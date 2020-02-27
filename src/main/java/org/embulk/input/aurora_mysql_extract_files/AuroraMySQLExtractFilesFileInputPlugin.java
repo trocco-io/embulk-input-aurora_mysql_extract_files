@@ -35,7 +35,6 @@ import org.slf4j.Logger;
 public class AuroraMySQLExtractFilesFileInputPlugin implements FileInputPlugin {
 
     private static final Logger log = Exec.getLogger(AuroraMySQLExtractFilesFileInputPlugin.class);
-    private AmazonS3 client;
 
     @Override
     public ConfigDiff transaction(ConfigSource config, FileInputPlugin.Control control) {
@@ -154,6 +153,7 @@ public class AuroraMySQLExtractFilesFileInputPlugin implements FileInputPlugin {
     }
 
     private List<String> getS3Keys(PluginTask task){
+        AmazonS3 client = newS3Client(task);
         ListObjectsRequest request = new ListObjectsRequest().withBucketName(task.getS3Bucket())
                 .withPrefix(String.format("%s.part",task.getS3PathPrefix()));
         ObjectListing list = client.listObjects(request);
@@ -162,7 +162,7 @@ public class AuroraMySQLExtractFilesFileInputPlugin implements FileInputPlugin {
     }
 
     private void deleteS3Dump(PluginTask task){
-        client = newS3Client(task);
+        AmazonS3 client = newS3Client(task);
         List<String> s3Keys = getS3Keys(task);
 
         if (s3Keys.isEmpty()){
