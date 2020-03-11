@@ -43,7 +43,7 @@ public interface PluginTask extends Task {
     public String getS3PathPrefix();
 
     @Config("ssl")
-    @ConfigDefault("\"disable\"") // backward compatibility
+    @ConfigDefault("\"disable\"")
     public Ssl getSsl();
 
     public List<String> getFiles();
