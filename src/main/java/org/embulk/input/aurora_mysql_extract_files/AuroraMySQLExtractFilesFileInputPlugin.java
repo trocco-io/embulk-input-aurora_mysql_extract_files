@@ -5,6 +5,7 @@ import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.Statement;
 import java.util.List;
+import java.util.Properties;
 import java.util.stream.Collectors;
 
 import com.amazonaws.services.s3.model.DeleteObjectsRequest;
@@ -78,8 +79,28 @@ public class AuroraMySQLExtractFilesFileInputPlugin implements FileInputPlugin {
         }
 
         String url = String.format("jdbc:mysql://%s:%d/%s", task.getHost(), task.getPort(), task.getDatabase());
+        Properties props = new Properties();
+        props.setProperty("user", task.getUser());
+        props.setProperty("password", task.getPassword());
+
+        switch (task.getSsl()) {
+            case DISABLE:
+                props.setProperty("useSSL", "false");
+                break;
+            case ENABLE:
+                props.setProperty("useSSL", "true");
+                props.setProperty("requireSSL", "true");
+                props.setProperty("verifyServerCertificate", "false");
+                break;
+            case VERIFY:
+                props.setProperty("useSSL", "true");
+                props.setProperty("requireSSL", "true");
+                props.setProperty("verifyServerCertificate", "true");
+                break;
+        }
+
         try {
-            Connection con = DriverManager.getConnection(url, task.getUser(), task.getPassword());
+            Connection con =  DriverManager.getConnection(url, props);
             String query = selectIntoQuery(task.getQuery(), task.getS3Bucket(), task.getS3PathPrefix());
             log.info(query);
             Statement stmt = con.createStatement();
