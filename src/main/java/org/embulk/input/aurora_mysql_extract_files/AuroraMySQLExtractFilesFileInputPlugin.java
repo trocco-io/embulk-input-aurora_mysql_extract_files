@@ -8,6 +8,7 @@ import java.util.List;
 import java.util.Properties;
 import java.util.stream.Collectors;
 
+import com.amazonaws.ClientConfiguration;
 import com.amazonaws.services.s3.model.DeleteObjectsRequest;
 
 import org.embulk.config.ConfigDiff;
@@ -167,10 +168,24 @@ public class AuroraMySQLExtractFilesFileInputPlugin implements FileInputPlugin {
     private static AmazonS3 newS3Client(PluginTask task) {
         BasicAWSCredentials awsCreds = new BasicAWSCredentials(task.getAwsAccessKey().orNull(),
                 task.getAwsSecretAccessKey().orNull());
+        ClientConfiguration clientConfiguration = getClientConfiguration(task);
         return AmazonS3ClientBuilder
             .standard()
             .withCredentials(new AWSStaticCredentialsProvider(awsCreds))
-            .withRegion(Regions.AP_NORTHEAST_1).build();
+            .withClientConfiguration(clientConfiguration)
+            .withRegion(Regions.AP_NORTHEAST_1)
+            .build();
+    }
+
+    private static ClientConfiguration getClientConfiguration(PluginTask task)
+    {
+        ClientConfiguration clientConfig = new ClientConfiguration();
+
+        clientConfig.setMaxConnections(50); // SDK default: 50
+        clientConfig.setMaxErrorRetry(3); // SDK default: 3
+        clientConfig.setSocketTimeout(8 * 60 * 1000); // SDK default: 50*1000
+
+        return clientConfig;
     }
 
     private List<String> getS3Keys(PluginTask task){
