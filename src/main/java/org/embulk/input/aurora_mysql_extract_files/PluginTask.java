@@ -9,7 +9,7 @@ import org.embulk.spi.BufferAllocator;
 
 import java.util.List;
 
-public interface PluginTask extends Task {
+public interface PluginTask extends Task, RetrySupportPluginTask {
     @Config("aws_access_key_id")
     public Optional<String> getAwsAccessKey();
 
