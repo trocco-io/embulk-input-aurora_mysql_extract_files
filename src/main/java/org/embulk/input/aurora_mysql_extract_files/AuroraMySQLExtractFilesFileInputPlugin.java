@@ -1,23 +1,25 @@
 package org.embulk.input.aurora_mysql_extract_files;
 
+import java.io.IOException;
 import java.io.InputStream;
 import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.Statement;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Properties;
 import java.util.stream.Collectors;
 
 import com.amazonaws.ClientConfiguration;
-import com.amazonaws.services.s3.model.DeleteObjectsRequest;
+import com.amazonaws.retry.PredefinedRetryPolicies;
+import com.amazonaws.services.s3.model.*;
 
-import org.embulk.config.ConfigDiff;
-import org.embulk.config.ConfigSource;
-import org.embulk.config.TaskReport;
-import org.embulk.config.TaskSource;
+import com.google.common.annotations.VisibleForTesting;
+import org.embulk.config.*;
 import org.embulk.spi.Exec;
 import org.embulk.spi.FileInputPlugin;
 import org.embulk.spi.TransactionalFileInput;
+import org.embulk.spi.util.InputStreamFileInput;
 import org.embulk.spi.util.InputStreamTransactionalFileInput;
 
 import com.amazonaws.auth.AWSStaticCredentialsProvider;
@@ -25,14 +27,13 @@ import com.amazonaws.auth.BasicAWSCredentials;
 import com.amazonaws.regions.Regions;
 import com.amazonaws.services.s3.AmazonS3;
 import com.amazonaws.services.s3.AmazonS3ClientBuilder;
-import com.amazonaws.services.s3.model.DeleteObjectRequest;
-import com.amazonaws.services.s3.model.GetObjectRequest;
-import com.amazonaws.services.s3.model.ListObjectsRequest;
-import com.amazonaws.services.s3.model.ObjectListing;
-import com.amazonaws.services.s3.model.S3Object;
-import com.amazonaws.services.s3.model.S3ObjectSummary;
 
+import org.embulk.spi.util.ResumableInputStream;
+import org.embulk.spi.util.RetryExecutor;
 import org.slf4j.Logger;
+
+import static java.lang.String.format;
+import static org.embulk.spi.util.RetryExecutor.retryExecutor;
 
 public class AuroraMySQLExtractFilesFileInputPlugin implements FileInputPlugin {
 
@@ -133,26 +134,10 @@ public class AuroraMySQLExtractFilesFileInputPlugin implements FileInputPlugin {
 
     @Override
     public TransactionalFileInput open(TaskSource taskSource, int taskIndex) {
-        // TODO: retry
         final PluginTask task = taskSource.loadTask(PluginTask.class);
 
         log.info(task.getFiles().get(taskIndex));
-        InputStream input = openInputStream(task, task.getFiles().get(taskIndex));
-        try {
-
-            return new InputStreamTransactionalFileInput(task.getBufferAllocator(), input) {
-                @Override
-                public void abort() {
-                }
-
-                @Override
-                public TaskReport commit() {
-                    return Exec.newTaskReport();
-                }
-            };
-        } catch (Exception e) {
-            return null;
-        }
+        return new S3FileInput(task, taskIndex);
     }
 
     public static InputStream openInputStream(PluginTask task, String file)
@@ -184,6 +169,7 @@ public class AuroraMySQLExtractFilesFileInputPlugin implements FileInputPlugin {
         clientConfig.setMaxConnections(50); // SDK default: 50
         clientConfig.setMaxErrorRetry(3); // SDK default: 3
         clientConfig.setSocketTimeout(8 * 60 * 1000); // SDK default: 50*1000
+        clientConfig.setRetryPolicy(PredefinedRetryPolicies.NO_RETRY_POLICY);
 
         return clientConfig;
     }
@@ -222,5 +208,126 @@ public class AuroraMySQLExtractFilesFileInputPlugin implements FileInputPlugin {
         List<String> s3Keys = getS3Keys(task);
         log.info(String.format("%d files", s3Keys.size()));
         task.setFiles(s3Keys);
+    }
+
+    @VisibleForTesting
+    static class S3InputStreamReopener
+            implements ResumableInputStream.Reopener
+    {
+        private final Logger log = Exec.getLogger(S3InputStreamReopener.class);
+
+        private final AmazonS3 client;
+        private final GetObjectRequest request;
+        private final long contentLength;
+        private final RetryExecutor retryExec;
+
+        public S3InputStreamReopener(AmazonS3 client, GetObjectRequest request, long contentLength)
+        {
+            this(client, request, contentLength, null);
+        }
+
+        public S3InputStreamReopener(AmazonS3 client, GetObjectRequest request, long contentLength, RetryExecutor retryExec)
+        {
+            this.client = client;
+            this.request = request;
+            this.contentLength = contentLength;
+            this.retryExec = retryExec;
+        }
+
+        @Override
+        public InputStream reopen(final long offset, final Exception closedCause) throws IOException
+        {
+            log.warn(format("S3 read failed. Retrying GET request with %,d bytes offset", offset), closedCause);
+            request.setRange(offset, contentLength - 1);  // [first, last]
+
+            return new DefaultRetryable<S3ObjectInputStream>(format("Getting object '%s'", request.getKey())) {
+                @Override
+                public S3ObjectInputStream call()
+                {
+                    return client.getObject(request).getObjectContent();
+                }
+            }.executeWithCheckedException(retryExec, IOException.class);
+        }
+    }
+
+    public class S3FileInput
+            extends InputStreamFileInput
+            implements TransactionalFileInput
+    {
+        public S3FileInput(PluginTask task, int taskIndex)
+        {
+            super(task.getBufferAllocator(), new SingleFileProvider(task, taskIndex));
+        }
+
+        public void abort()
+        {
+        }
+
+        public TaskReport commit()
+        {
+            return Exec.newTaskReport();
+        }
+
+        @Override
+        public void close()
+        {
+        }
+    }
+
+    private static RetryExecutor retryExecutorFrom(RetrySupportPluginTask task)
+    {
+        return retryExecutor()
+                .withRetryLimit(task.getMaximumRetries())
+                .withInitialRetryWait(task.getInitialRetryIntervalMillis())
+                .withMaxRetryWait(task.getMaximumRetryIntervalMillis());
+    }
+
+    // TODO create single-file InputStreamFileInput utility
+    private class SingleFileProvider
+            implements InputStreamFileInput.Provider
+    {
+        private AmazonS3 client;
+        private final String bucket;
+        private final Iterator<String> iterator;
+        private final RetryExecutor retryExec;
+
+        public SingleFileProvider(PluginTask task, int taskIndex)
+        {
+            this.client = newS3Client(task);
+            this.bucket = task.getS3Bucket();
+            this.iterator = task.getFiles().listIterator(taskIndex);
+            this.retryExec = retryExecutorFrom(task);
+        }
+
+        @Override
+        public InputStreamFileInput.InputStreamWithHints openNextWithHints() throws IOException
+        {
+
+            if (!iterator.hasNext()) {
+                return null;
+            }
+            final String key = iterator.next();
+            final GetObjectRequest request = new GetObjectRequest(bucket, key);
+
+            S3Object object = new DefaultRetryable<S3Object>(format("Getting object '%s'", request.getKey())) {
+                @Override
+                public S3Object call()
+                {
+                    return client.getObject(request);
+                }
+            }.executeWithCheckedException(retryExec, IOException.class);
+
+            long objectSize = object.getObjectMetadata().getContentLength();
+            // Some plugin users are parsing this output to get file list.
+            // Keep it for now but might be removed in the future.
+            log.info("Open S3Object with bucket [{}], key [{}], with size [{}]", bucket, key, objectSize);
+            InputStream inputStream = new ResumableInputStream(object.getObjectContent(), new S3InputStreamReopener(client, request, objectSize, retryExec));
+            return new InputStreamFileInput.InputStreamWithHints(inputStream, String.format("s3://%s/%s", bucket, key));
+        }
+
+        @Override
+        public void close()
+        {
+        }
     }
 }
