@@ -12,3 +12,4 @@ build/
 .project
 local_config.yml
 .vscode
+config.yml
