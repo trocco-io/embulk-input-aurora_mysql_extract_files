@@ -4,6 +4,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.sql.Connection;
 import java.sql.DriverManager;
+import java.sql.SQLException;
 import java.sql.Statement;
 import java.util.Iterator;
 import java.util.List;
@@ -106,6 +107,22 @@ public class AuroraMySQLExtractFilesFileInputPlugin implements FileInputPlugin {
             String query = selectIntoQuery(task.getQuery(), task.getS3Bucket(), task.getS3PathPrefix());
             log.info(query);
             Statement stmt = con.createStatement();
+
+            // interrupt query when embulk process is shutdown
+            Runtime.getRuntime().addShutdownHook(new Thread(){
+                @Override
+                public void run(){
+                    try {
+                        log.info("Shutdown detected");
+                        stmt.cancel();
+                        if(!stmt.isClosed()){
+                            stmt.cancel();
+                        }
+                    } catch (SQLException e){
+                        log.error(e.getMessage());
+                    }
+                }
+            });
             try {
                 stmt.executeQuery(query);
                 log.info("query succeeded");
@@ -288,25 +305,20 @@ public class AuroraMySQLExtractFilesFileInputPlugin implements FileInputPlugin {
     {
         private AmazonS3 client;
         private final String bucket;
-        private final Iterator<String> iterator;
         private final RetryExecutor retryExec;
+        private final String key;
 
         public SingleFileProvider(PluginTask task, int taskIndex)
         {
             this.client = newS3Client(task);
             this.bucket = task.getS3Bucket();
-            this.iterator = task.getFiles().listIterator(taskIndex);
+            this.key = task.getFiles().get(taskIndex);
             this.retryExec = retryExecutorFrom(task);
         }
 
         @Override
         public InputStreamFileInput.InputStreamWithHints openNextWithHints() throws IOException
         {
-
-            if (!iterator.hasNext()) {
-                return null;
-            }
-            final String key = iterator.next();
             final GetObjectRequest request = new GetObjectRequest(bucket, key);
 
             S3Object object = new DefaultRetryable<S3Object>(format("Getting object '%s'", request.getKey())) {
