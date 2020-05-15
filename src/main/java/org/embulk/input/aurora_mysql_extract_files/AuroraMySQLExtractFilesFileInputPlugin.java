@@ -116,7 +116,7 @@ public class AuroraMySQLExtractFilesFileInputPlugin implements FileInputPlugin {
                         log.info("Shutdown detected");
                         stmt.cancel();
                         if(!stmt.isClosed()){
-                            stmt.cancel();
+                            stmt.close();
                         }
                     } catch (SQLException e){
                         log.error(e.getMessage());
