@@ -107,23 +107,23 @@ public class AuroraMySQLExtractFilesFileInputPlugin implements FileInputPlugin {
             String query = selectIntoQuery(task.getQuery(), task.getS3Bucket(), task.getS3PathPrefix());
             log.info(query);
             Statement stmt = con.createStatement();
-
-            // interrupt query when embulk process is shutdown
-            Runtime.getRuntime().addShutdownHook(new Thread(){
-                @Override
-                public void run(){
-                    try {
-                        stmt.cancel();
-                        if(!stmt.isClosed()){
-                            stmt.close();
-                        }
-                    } catch (SQLException e){
-                        log.error(e.getMessage());
+            Thread cancelQuery = new Thread(() -> {
+                try {
+                    log.info("canceling query");
+                    stmt.cancel();
+                    if(!stmt.isClosed()){
+                        stmt.close();
                     }
+                } catch (SQLException e){
+                    log.error(e.getMessage());
                 }
             });
+
+            // interrupt query when embulk process is shutdown
+            Runtime.getRuntime().addShutdownHook(cancelQuery);
             try {
                 stmt.executeQuery(query);
+                Runtime.getRuntime().removeShutdownHook(cancelQuery);
                 log.info("query succeeded");
             } finally {
                 log.info("query finished");
