@@ -113,7 +113,6 @@ public class AuroraMySQLExtractFilesFileInputPlugin implements FileInputPlugin {
                 @Override
                 public void run(){
                     try {
-                        log.info("Shutdown detected");
                         stmt.cancel();
                         if(!stmt.isClosed()){
                             stmt.close();
