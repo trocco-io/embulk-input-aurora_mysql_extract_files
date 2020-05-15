@@ -307,6 +307,7 @@ public class AuroraMySQLExtractFilesFileInputPlugin implements FileInputPlugin {
         private final String bucket;
         private final RetryExecutor retryExec;
         private final String key;
+        private boolean provided = false;
 
         public SingleFileProvider(PluginTask task, int taskIndex)
         {
@@ -319,6 +320,10 @@ public class AuroraMySQLExtractFilesFileInputPlugin implements FileInputPlugin {
         @Override
         public InputStreamFileInput.InputStreamWithHints openNextWithHints() throws IOException
         {
+            if (provided){
+                return null;
+            }
+            provided = true;
             final GetObjectRequest request = new GetObjectRequest(bucket, key);
 
             S3Object object = new DefaultRetryable<S3Object>(format("Getting object '%s'", request.getKey())) {
