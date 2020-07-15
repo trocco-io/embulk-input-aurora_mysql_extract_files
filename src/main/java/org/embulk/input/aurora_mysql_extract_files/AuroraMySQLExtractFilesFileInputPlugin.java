@@ -132,6 +132,7 @@ public class AuroraMySQLExtractFilesFileInputPlugin implements FileInputPlugin {
         } catch (Exception e) {
             // TODO: handle exception
             log.error("connection error", e);
+            throw new RuntimeException(e.getMessage());
         }
     }
 
