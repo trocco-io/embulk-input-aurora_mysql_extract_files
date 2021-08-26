@@ -58,6 +58,10 @@ public interface PluginTask extends Task, RetrySupportPluginTask {
     @ConfigDefault("true")
     public boolean getAllowBeforeCleanUp();
 
+    @Config("allow_after_clean_up")
+    @ConfigDefault("true")
+    public boolean getAllowAfterCleanUp();
+
     @Config("skip_query")
     @ConfigDefault("false")
     public boolean getSkipQuery();
