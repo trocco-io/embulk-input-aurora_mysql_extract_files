@@ -65,4 +65,8 @@ public interface PluginTask extends Task, RetrySupportPluginTask {
     @Config("skip_query")
     @ConfigDefault("false")
     public boolean getSkipQuery();
+
+    @Config("socket_timeout")
+    @ConfigDefault("1800")
+    public int getSocketTimeout();
 }

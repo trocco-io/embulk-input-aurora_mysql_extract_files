@@ -86,6 +86,7 @@ public class AuroraMySQLExtractFilesFileInputPlugin implements FileInputPlugin {
         Properties props = new Properties();
         props.setProperty("user", task.getUser());
         props.setProperty("password", task.getPassword());
+        props.setProperty("socketTimeout", String.valueOf(task.getSocketTimeout() * 1000)); // specified in milliseconds
 
         switch (task.getSsl()) {
             case DISABLE:
