@@ -1,15 +1,14 @@
 package org.embulk.input.aurora_mysql_extract_files;
 
-import com.google.common.base.Optional;
-import org.embulk.config.Config;
-import org.embulk.config.ConfigDefault;
-import org.embulk.config.ConfigInject;
-import org.embulk.config.Task;
-import org.embulk.spi.BufferAllocator;
+import org.embulk.util.config.Config;
+import org.embulk.util.config.ConfigDefault;
+import org.embulk.util.config.Task;
 
 import java.util.List;
+import java.util.Optional;
 
-public interface PluginTask extends Task, RetrySupportPluginTask {
+public interface PluginTask extends Task, RetrySupportPluginTask
+{
     @Config("aws_access_key_id")
     public Optional<String> getAwsAccessKey();
 
@@ -49,9 +48,6 @@ public interface PluginTask extends Task, RetrySupportPluginTask {
     public List<String> getFiles();
 
     public void setFiles(List<String> files);
-
-    @ConfigInject
-    public BufferAllocator getBufferAllocator();
 
     // debug option
     @Config("allow_before_clean_up")

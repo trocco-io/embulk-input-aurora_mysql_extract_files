@@ -2,7 +2,6 @@ package org.embulk.input.aurora_mysql_extract_files;
 
 import com.fasterxml.jackson.annotation.JsonCreator;
 import com.fasterxml.jackson.annotation.JsonValue;
-
 import org.embulk.config.ConfigException;
 
 public enum Ssl

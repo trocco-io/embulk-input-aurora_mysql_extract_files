@@ -3,19 +3,18 @@ package org.embulk.input.aurora_mysql_extract_files;
 // ref: https://github.com/embulk/embulk-input-s3/blob/master/embulk-input-s3/src/main/java/org/embulk/input/s3/DefaultRetryable.java
 
 import com.amazonaws.AmazonServiceException;
-import com.google.common.base.Throwables;
 import org.apache.http.HttpStatus;
-import org.embulk.spi.Exec;
-import org.embulk.spi.util.RetryExecutor;
+import org.embulk.util.retryhelper.RetryExecutor;
+import org.embulk.util.retryhelper.RetryGiveupException;
+import org.embulk.util.retryhelper.Retryable;
 import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.util.HashSet;
 import java.util.Set;
 import java.util.concurrent.Callable;
 
 import static java.lang.String.format;
-import static org.embulk.spi.util.RetryExecutor.RetryGiveupException;
-import static org.embulk.spi.util.RetryExecutor.Retryable;
 
 /**
  * Retryable utility, regardless the occurred exceptions,
@@ -23,10 +22,10 @@ import static org.embulk.spi.util.RetryExecutor.Retryable;
  */
 public class DefaultRetryable<T> implements Retryable<T>
 {
-    private static final Logger log = Exec.getLogger(DefaultRetryable.class);
-    private static final Set<Integer> NONRETRYABLE_STATUS_CODES = new HashSet<Integer>(2);
-    private static final Set<String> NONRETRYABLE_ERROR_CODES = new HashSet<String>(1);
-    private String operationName;
+    private static final Logger log = LoggerFactory.getLogger(DefaultRetryable.class);
+    private static final Set<Integer> NONRETRYABLE_STATUS_CODES = new HashSet<>(2);
+    private static final Set<String> NONRETRYABLE_ERROR_CODES = new HashSet<>(1);
+    private final String operationName;
     private Callable<T> callable;
 
     static {
@@ -124,7 +123,7 @@ public class DefaultRetryable<T> implements Retryable<T>
                 return this.call();
             }
             catch (Exception e) {
-                Throwables.propagate(e);
+                throw propagate(e);
             }
         }
 
@@ -132,10 +131,10 @@ public class DefaultRetryable<T> implements Retryable<T>
             return executor.runInterruptible(this);
         }
         catch (RetryGiveupException e) {
-            throw Throwables.propagate(e.getCause());
+            throw propagate(e.getCause());
         }
         catch (InterruptedException e) {
-            throw Throwables.propagate(e);
+            throw propagate(e);
         }
     }
 
@@ -158,7 +157,7 @@ public class DefaultRetryable<T> implements Retryable<T>
                 return this.call();
             }
             catch (Exception e) {
-                Throwables.propagate(e);
+                throw propagate(e);
             }
         }
 
@@ -166,11 +165,34 @@ public class DefaultRetryable<T> implements Retryable<T>
             return executor.runInterruptible(this);
         }
         catch (RetryGiveupException e) {
-            Throwables.propagateIfInstanceOf(e.getCause(), propagateAsIsException);
-            throw Throwables.propagate(e.getCause());
+            propagateIfInstanceOf(e.getCause(), propagateAsIsException);
+            throw propagate(e.getCause());
         }
         catch (InterruptedException e) {
-            throw Throwables.propagate(e);
+            throw propagate(e);
+        }
+    }
+
+    @Deprecated
+    // https://github.com/google/guava/blob/v18.0/guava/src/com/google/common/base/Preconditions.java#L208-L213
+    // https://github.com/google/guava/blob/v18.0/guava/src/com/google/common/base/Throwables.java#L158-L161
+    // https://github.com/google/guava/blob/v18.0/guava/src/com/google/common/base/Throwables.java#L82-L85
+    private static RuntimeException propagate(Throwable throwable)
+    {
+        if (throwable == null) {
+            throw new NullPointerException();
+        }
+        propagateIfInstanceOf(throwable, Error.class);
+        propagateIfInstanceOf(throwable, RuntimeException.class);
+        throw new RuntimeException(throwable);
+    }
+
+    @Deprecated
+    // https://github.com/google/guava/blob/v18.0/guava/src/com/google/common/base/Throwables.java#L60-L66
+    private static <X extends Throwable> void propagateIfInstanceOf(Throwable throwable, Class<X> declaredType) throws X
+    {
+        if (throwable != null && declaredType.isInstance(throwable)) {
+            throw declaredType.cast(throwable);
         }
     }
 }
