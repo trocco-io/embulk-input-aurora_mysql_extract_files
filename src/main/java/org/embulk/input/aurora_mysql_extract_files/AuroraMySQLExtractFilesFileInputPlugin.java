@@ -1,83 +1,100 @@
 package org.embulk.input.aurora_mysql_extract_files;
 
+import com.amazonaws.ClientConfiguration;
+import com.amazonaws.auth.AWSStaticCredentialsProvider;
+import com.amazonaws.auth.BasicAWSCredentials;
+import com.amazonaws.regions.Regions;
+import com.amazonaws.retry.PredefinedRetryPolicies;
+import com.amazonaws.services.s3.AmazonS3;
+import com.amazonaws.services.s3.AmazonS3ClientBuilder;
+import com.amazonaws.services.s3.model.DeleteObjectRequest;
+import com.amazonaws.services.s3.model.DeleteObjectsRequest;
+import com.amazonaws.services.s3.model.GetObjectRequest;
+import com.amazonaws.services.s3.model.ListObjectsRequest;
+import com.amazonaws.services.s3.model.ObjectListing;
+import com.amazonaws.services.s3.model.S3Object;
+import com.amazonaws.services.s3.model.S3ObjectInputStream;
+import com.amazonaws.services.s3.model.S3ObjectSummary;
+import org.embulk.config.ConfigDiff;
+import org.embulk.config.ConfigSource;
+import org.embulk.config.TaskReport;
+import org.embulk.config.TaskSource;
+import org.embulk.spi.Exec;
+import org.embulk.spi.FileInputPlugin;
+import org.embulk.spi.TransactionalFileInput;
+import org.embulk.util.config.ConfigMapper;
+import org.embulk.util.config.ConfigMapperFactory;
+import org.embulk.util.config.TaskMapper;
+import org.embulk.util.file.InputStreamFileInput;
+import org.embulk.util.file.ResumableInputStream;
+import org.embulk.util.retryhelper.RetryExecutor;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import java.io.IOException;
 import java.io.InputStream;
 import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.SQLException;
 import java.sql.Statement;
-import java.util.Iterator;
 import java.util.List;
 import java.util.Properties;
 import java.util.stream.Collectors;
 
-import com.amazonaws.ClientConfiguration;
-import com.amazonaws.retry.PredefinedRetryPolicies;
-import com.amazonaws.services.s3.model.*;
-
-import com.google.common.annotations.VisibleForTesting;
-import org.embulk.config.*;
-import org.embulk.spi.Exec;
-import org.embulk.spi.FileInputPlugin;
-import org.embulk.spi.TransactionalFileInput;
-import org.embulk.spi.util.InputStreamFileInput;
-import org.embulk.spi.util.InputStreamTransactionalFileInput;
-
-import com.amazonaws.auth.AWSStaticCredentialsProvider;
-import com.amazonaws.auth.BasicAWSCredentials;
-import com.amazonaws.regions.Regions;
-import com.amazonaws.services.s3.AmazonS3;
-import com.amazonaws.services.s3.AmazonS3ClientBuilder;
-
-import org.embulk.spi.util.ResumableInputStream;
-import org.embulk.spi.util.RetryExecutor;
-import org.slf4j.Logger;
-
 import static java.lang.String.format;
-import static org.embulk.spi.util.RetryExecutor.retryExecutor;
+import static org.embulk.util.retryhelper.RetryExecutor.builder;
 
-public class AuroraMySQLExtractFilesFileInputPlugin implements FileInputPlugin {
-
-    private static final Logger log = Exec.getLogger(AuroraMySQLExtractFilesFileInputPlugin.class);
+public class AuroraMySQLExtractFilesFileInputPlugin implements FileInputPlugin
+{
+    private static final ConfigMapperFactory CONFIG_MAPPER_FACTORY = ConfigMapperFactory.builder().addDefaultModules().build();
+    private static final Logger log = LoggerFactory.getLogger(AuroraMySQLExtractFilesFileInputPlugin.class);
 
     @Override
-    public ConfigDiff transaction(ConfigSource config, FileInputPlugin.Control control) {
-        PluginTask task = config.loadConfig(PluginTask.class);
+    public ConfigDiff transaction(ConfigSource config, FileInputPlugin.Control control)
+    {
+        ConfigMapper configMapper = CONFIG_MAPPER_FACTORY.createConfigMapper();
+        PluginTask task = configMapper.map(config, PluginTask.class);
         // delete s3
         try {
             if (task.getAllowBeforeCleanUp()) {
                 deleteS3Dump(task);
-            } else {
+            }
+            else {
                 log.info("Skip S3 Clean up");
             }
-        } catch (Exception e) {
+        }
+        catch (Exception e) {
             log.error("delete error: ", e);
             return null;
         }
 
         if (!task.getSkipQuery()) {
             executeAuroraQuery(task);
-        } else {
+        }
+        else {
             log.info("Skip query execution");
         }
         setFiles(task);
         // run() method is called for this number of times in parallel.
         int taskCount = task.getFiles().size();
 
-        return resume(task.dump(), taskCount, control);
+        return resume(task.toTaskSource(), taskCount, control);
     }
 
-    public String selectIntoQuery(String query, String s3Bucket, String s3PathPrefix) {
+    public String selectIntoQuery(String query, String s3Bucket, String s3PathPrefix)
+    {
         String s3Path = String.format("s3://%s/%s", s3Bucket, s3PathPrefix);
         return String.format(
                 "%s INTO OUTFILE S3 '%s' CHARACTER SET UTF8 FIELDS TERMINATED BY '\\t' ENCLOSED BY '\"' MANIFEST OFF OVERWRITE ON;",
                 query, s3Path);
     }
 
-    public void executeAuroraQuery(PluginTask task) {
+    public void executeAuroraQuery(PluginTask task)
+    {
         try {
             Class.forName("com.mysql.jdbc.Driver");
-        } catch (ClassNotFoundException ex) {
+        }
+        catch (ClassNotFoundException ex) {
             log.info("error");
             return;
         }
@@ -116,7 +133,8 @@ public class AuroraMySQLExtractFilesFileInputPlugin implements FileInputPlugin {
                     if (!stmt.isClosed()) {
                         stmt.close();
                     }
-                } catch (SQLException e) {
+                }
+                catch (SQLException e) {
                     log.error(e.getMessage());
                 }
             });
@@ -127,11 +145,13 @@ public class AuroraMySQLExtractFilesFileInputPlugin implements FileInputPlugin {
                 stmt.executeQuery(query);
                 Runtime.getRuntime().removeShutdownHook(cancelQuery);
                 log.info("query succeeded");
-            } finally {
+            }
+            finally {
                 log.info("query finished");
                 stmt.close();
             }
-        } catch (Exception e) {
+        }
+        catch (Exception e) {
             // TODO: handle exception
             log.error("connection error", e);
             throw new RuntimeException(e.getMessage());
@@ -139,31 +159,37 @@ public class AuroraMySQLExtractFilesFileInputPlugin implements FileInputPlugin {
     }
 
     @Override
-    public ConfigDiff resume(TaskSource taskSource, int taskCount, FileInputPlugin.Control control) {
+    public ConfigDiff resume(TaskSource taskSource, int taskCount, FileInputPlugin.Control control)
+    {
         control.run(taskSource, taskCount);
 
-        ConfigDiff configDiff = Exec.newConfigDiff();
+        ConfigDiff configDiff = CONFIG_MAPPER_FACTORY.newConfigDiff();
 
         return configDiff;
     }
 
     @Override
-    public void cleanup(TaskSource taskSource, int taskCount, List<TaskReport> successTaskReports) {
-        final PluginTask task = taskSource.loadTask(PluginTask.class);
+    public void cleanup(TaskSource taskSource, int taskCount, List<TaskReport> successTaskReports)
+    {
+        TaskMapper taskMapper = CONFIG_MAPPER_FACTORY.createTaskMapper();
+        final PluginTask task = taskMapper.map(taskSource, PluginTask.class);
         if (task.getAllowAfterCleanUp()) {
             deleteS3Dump(task);
         }
     }
 
     @Override
-    public TransactionalFileInput open(TaskSource taskSource, int taskIndex) {
-        final PluginTask task = taskSource.loadTask(PluginTask.class);
+    public TransactionalFileInput open(TaskSource taskSource, int taskIndex)
+    {
+        TaskMapper taskMapper = CONFIG_MAPPER_FACTORY.createTaskMapper();
+        final PluginTask task = taskMapper.map(taskSource, PluginTask.class);
 
         log.info(task.getFiles().get(taskIndex));
         return new S3FileInput(task, taskIndex);
     }
 
-    public static InputStream openInputStream(PluginTask task, String file) {
+    public static InputStream openInputStream(PluginTask task, String file)
+    {
         AmazonS3 client = newS3Client(task);
         final GetObjectRequest request = new GetObjectRequest(task.getS3Bucket(), file);
         S3Object object = client.getObject(request);
@@ -172,15 +198,17 @@ public class AuroraMySQLExtractFilesFileInputPlugin implements FileInputPlugin {
         return object.getObjectContent();
     }
 
-    private static AmazonS3 newS3Client(PluginTask task) {
-        BasicAWSCredentials awsCreds = new BasicAWSCredentials(task.getAwsAccessKey().orNull(),
-                task.getAwsSecretAccessKey().orNull());
+    private static AmazonS3 newS3Client(PluginTask task)
+    {
+        BasicAWSCredentials awsCreds = new BasicAWSCredentials(task.getAwsAccessKey().orElse(null),
+                task.getAwsSecretAccessKey().orElse(null));
         ClientConfiguration clientConfiguration = getClientConfiguration(task);
         return AmazonS3ClientBuilder.standard().withCredentials(new AWSStaticCredentialsProvider(awsCreds))
                 .withClientConfiguration(clientConfiguration).withRegion(Regions.AP_NORTHEAST_1).build();
     }
 
-    private static ClientConfiguration getClientConfiguration(PluginTask task) {
+    private static ClientConfiguration getClientConfiguration(PluginTask task)
+    {
         ClientConfiguration clientConfig = new ClientConfiguration();
 
         clientConfig.setMaxConnections(50); // SDK default: 50
@@ -191,7 +219,8 @@ public class AuroraMySQLExtractFilesFileInputPlugin implements FileInputPlugin {
         return clientConfig;
     }
 
-    private List<String> getS3Keys(PluginTask task) {
+    private List<String> getS3Keys(PluginTask task)
+    {
         AmazonS3 client = newS3Client(task);
         ListObjectsRequest request = new ListObjectsRequest().withBucketName(task.getS3Bucket())
                 .withPrefix(String.format("%s.part", task.getS3PathPrefix()));
@@ -200,13 +229,15 @@ public class AuroraMySQLExtractFilesFileInputPlugin implements FileInputPlugin {
         return objects.stream().map(S3ObjectSummary::getKey).collect(Collectors.toList());
     }
 
-    private void deleteS3Dump(PluginTask task) {
+    private void deleteS3Dump(PluginTask task)
+    {
         AmazonS3 client = newS3Client(task);
         List<String> s3Keys = getS3Keys(task);
 
         if (s3Keys.isEmpty()) {
             log.info("no objects are detected for delete");
-        } else {
+        }
+        else {
             log.info("deleting objects");
             List<String> s3Paths = s3Keys.stream().map(k -> String.format("s3://%s/%s", task.getS3Bucket(), k))
                     .collect(Collectors.toList());
@@ -220,28 +251,30 @@ public class AuroraMySQLExtractFilesFileInputPlugin implements FileInputPlugin {
         }
     }
 
-    private void setFiles(PluginTask task) {
+    private void setFiles(PluginTask task)
+    {
         // TODO: read manifest
         List<String> s3Keys = getS3Keys(task);
         log.info(String.format("%d files", s3Keys.size()));
         task.setFiles(s3Keys);
     }
 
-    @VisibleForTesting
-    static class S3InputStreamReopener implements ResumableInputStream.Reopener {
-        private final Logger log = Exec.getLogger(S3InputStreamReopener.class);
+    static class S3InputStreamReopener implements ResumableInputStream.Reopener
+    {
+        private final Logger log = LoggerFactory.getLogger(S3InputStreamReopener.class);
 
         private final AmazonS3 client;
         private final GetObjectRequest request;
         private final long contentLength;
         private final RetryExecutor retryExec;
 
-        public S3InputStreamReopener(AmazonS3 client, GetObjectRequest request, long contentLength) {
+        public S3InputStreamReopener(AmazonS3 client, GetObjectRequest request, long contentLength)
+        {
             this(client, request, contentLength, null);
         }
 
-        public S3InputStreamReopener(AmazonS3 client, GetObjectRequest request, long contentLength,
-                RetryExecutor retryExec) {
+        public S3InputStreamReopener(AmazonS3 client, GetObjectRequest request, long contentLength, RetryExecutor retryExec)
+        {
             this.client = client;
             this.request = request;
             this.contentLength = contentLength;
@@ -249,51 +282,61 @@ public class AuroraMySQLExtractFilesFileInputPlugin implements FileInputPlugin {
         }
 
         @Override
-        public InputStream reopen(final long offset, final Exception closedCause) throws IOException {
+        public InputStream reopen(final long offset, final Exception closedCause) throws IOException
+        {
             log.warn(format("S3 read failed. Retrying GET request with %,d bytes offset", offset), closedCause);
             request.setRange(offset, contentLength - 1); // [first, last]
 
             return new DefaultRetryable<S3ObjectInputStream>(format("Getting object '%s'", request.getKey())) {
                 @Override
-                public S3ObjectInputStream call() {
+                public S3ObjectInputStream call()
+                {
                     return client.getObject(request).getObjectContent();
                 }
             }.executeWithCheckedException(retryExec, IOException.class);
         }
     }
 
-    public class S3FileInput extends InputStreamFileInput implements TransactionalFileInput {
-        public S3FileInput(PluginTask task, int taskIndex) {
-            super(task.getBufferAllocator(), new SingleFileProvider(task, taskIndex));
+    public static class S3FileInput extends InputStreamFileInput implements TransactionalFileInput
+    {
+        public S3FileInput(PluginTask task, int taskIndex)
+        {
+            super(Exec.getBufferAllocator(), new SingleFileProvider(task, taskIndex));
         }
 
-        public void abort() {
+        public void abort()
+        {
         }
 
-        public TaskReport commit() {
-            return Exec.newTaskReport();
+        public TaskReport commit()
+        {
+            return CONFIG_MAPPER_FACTORY.newTaskReport();
         }
 
         @Override
-        public void close() {
+        public void close()
+        {
         }
     }
 
-    private static RetryExecutor retryExecutorFrom(RetrySupportPluginTask task) {
-        return retryExecutor().withRetryLimit(task.getMaximumRetries())
-                .withInitialRetryWait(task.getInitialRetryIntervalMillis())
-                .withMaxRetryWait(task.getMaximumRetryIntervalMillis());
+    private static RetryExecutor retryExecutorFrom(RetrySupportPluginTask task)
+    {
+        return builder().withRetryLimit(task.getMaximumRetries())
+                .withInitialRetryWaitMillis(task.getInitialRetryIntervalMillis())
+                .withMaxRetryWaitMillis(task.getMaximumRetryIntervalMillis()).build();
     }
 
     // TODO create single-file InputStreamFileInput utility
-    private class SingleFileProvider implements InputStreamFileInput.Provider {
-        private AmazonS3 client;
+    private static class SingleFileProvider implements InputStreamFileInput.Provider
+    {
+        private final AmazonS3 client;
         private final String bucket;
         private final RetryExecutor retryExec;
         private final String key;
         private boolean provided = false;
 
-        public SingleFileProvider(PluginTask task, int taskIndex) {
+        public SingleFileProvider(PluginTask task, int taskIndex)
+        {
             this.client = newS3Client(task);
             this.bucket = task.getS3Bucket();
             this.key = task.getFiles().get(taskIndex);
@@ -301,7 +344,8 @@ public class AuroraMySQLExtractFilesFileInputPlugin implements FileInputPlugin {
         }
 
         @Override
-        public InputStreamFileInput.InputStreamWithHints openNextWithHints() throws IOException {
+        public InputStreamFileInput.InputStreamWithHints openNextWithHints() throws IOException
+        {
             if (provided) {
                 return null;
             }
@@ -310,7 +354,8 @@ public class AuroraMySQLExtractFilesFileInputPlugin implements FileInputPlugin {
 
             S3Object object = new DefaultRetryable<S3Object>(format("Getting object '%s'", request.getKey())) {
                 @Override
-                public S3Object call() {
+                public S3Object call()
+                {
                     return client.getObject(request);
                 }
             }.executeWithCheckedException(retryExec, IOException.class);
@@ -325,7 +370,8 @@ public class AuroraMySQLExtractFilesFileInputPlugin implements FileInputPlugin {
         }
 
         @Override
-        public void close() {
+        public void close()
+        {
         }
     }
 }
