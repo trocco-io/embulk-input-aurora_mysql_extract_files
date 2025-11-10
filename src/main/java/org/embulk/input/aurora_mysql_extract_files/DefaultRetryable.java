@@ -2,13 +2,12 @@ package org.embulk.input.aurora_mysql_extract_files;
 
 // ref: https://github.com/embulk/embulk-input-s3/blob/master/embulk-input-s3/src/main/java/org/embulk/input/s3/DefaultRetryable.java
 
-import com.amazonaws.AmazonServiceException;
-import org.apache.http.HttpStatus;
 import org.embulk.util.retryhelper.RetryExecutor;
 import org.embulk.util.retryhelper.RetryGiveupException;
 import org.embulk.util.retryhelper.Retryable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import software.amazon.awssdk.awscore.exception.AwsServiceException;
 
 import java.util.HashSet;
 import java.util.Set;
@@ -29,8 +28,8 @@ public class DefaultRetryable<T> implements Retryable<T>
     private Callable<T> callable;
 
     static {
-        NONRETRYABLE_STATUS_CODES.add(HttpStatus.SC_FORBIDDEN);
-        NONRETRYABLE_STATUS_CODES.add(HttpStatus.SC_METHOD_NOT_ALLOWED);
+        NONRETRYABLE_STATUS_CODES.add(403); // Forbidden
+        NONRETRYABLE_STATUS_CODES.add(405); // Method Not Allowed
         NONRETRYABLE_ERROR_CODES.add("ExpiredToken");
     }
 
@@ -77,9 +76,9 @@ public class DefaultRetryable<T> implements Retryable<T>
     public boolean isRetryableException(Exception exception)
     {
         // No retry on a subset of service exceptions
-        if (exception instanceof AmazonServiceException) {
-            AmazonServiceException ase = (AmazonServiceException) exception;
-            return !NONRETRYABLE_STATUS_CODES.contains(ase.getStatusCode()) && !NONRETRYABLE_ERROR_CODES.contains(ase.getErrorCode());
+        if (exception instanceof AwsServiceException) {
+            AwsServiceException ase = (AwsServiceException) exception;
+            return !NONRETRYABLE_STATUS_CODES.contains(ase.statusCode()) && !NONRETRYABLE_ERROR_CODES.contains(ase.awsErrorDetails().errorCode());
         }
         return true;
     }
