@@ -36,7 +36,9 @@ dependencies {
     implementation "org.embulk:embulk-util-config:0.3.4"
     implementation "org.embulk:embulk-util-file:0.2.0"
     implementation "org.embulk:embulk-util-retryhelper:0.9.0"
-    implementation "com.amazonaws:aws-java-sdk-s3:1.11.714"
+    implementation platform("software.amazon.awssdk:bom:2.20.0")
+    implementation "software.amazon.awssdk:s3"
+    implementation "software.amazon.awssdk:apache-client"
     implementation "mysql:mysql-connector-java:5.1.44"
 
     testImplementation "junit:junit:4.+"
